@@ -780,10 +780,11 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
         }
 
         // nxnative: the memory pool table the host binds for raw global memory (dmsh_abi.h DMSH_GMEM_MAP_*): a storage buffer reserved under this sentinel constant buffer
-        // slot, which no constant buffer of the game has (dmsh_build.py turns it into DMSH_KIND_GMEM_MAP). 1 << GmemMapLog2 entries of GmemMapEntryWords words each,
-        // {start lo, start hi, end lo, end hi, delta lo, delta hi, hint, 0}, sorted by start; entry 0 is empty (start 0, end 0) and unused entries start at ~0
+        // slot, which no constant buffer of the game has (dmsh_build.py turns it into DMSH_KIND_GMEM_MAP). a dynamic power-of-two number of GmemMapEntryWords-word entries,
+        // {start lo, start hi, end lo, end hi, delta lo, delta hi, hint index, hint chunk}, sorted by start; entry 0 is empty (start 0, end 0) and unused entries start at ~0
         public const int GmemMapCbSlot = 0xff;
-        private const int GmemMapLog2 = 12;
+        private const int GmemMapCountWord = 4;
+        private const int GmemHintMask = 4095;
         private const int GmemMapEntryWords = 8;
         private const int GmemHintShift = 21;
 
@@ -849,32 +850,37 @@ namespace Ryujinx.Graphics.Shader.Translation.Optimizations
 
             // The host's tagged hint covers a whole chunk inside one entry. NDVE repeatedly accesses the same large pools from adjacent lanes.
             Operand chunk = context.BitwiseOr(context.ShiftLeft(addrHigh, Const(32 - GmemHintShift)), context.ShiftRightU32(addrLow, Const(GmemHintShift)));
-            Operand indexMask = Const((1 << GmemMapLog2) - 1);
-            Operand hint = MapWord(context.IMultiply(context.BitwiseAnd(chunk, indexMask), Const(GmemMapEntryWords)), 6);
-            Operand hintIndex = context.BitwiseAnd(hint, indexMask);
-            Operand hintFits = context.BitwiseAnd(context.ICompareNotEqual(hintIndex, Const(0)), context.ICompareEqual(context.ShiftRightU32(hint, Const(GmemMapLog2)), chunk));
-            hintFits = context.BitwiseAnd(hintFits, context.ICompareLessUnsigned(addrHigh, Const(1 << (GmemHintShift - GmemMapLog2))));
+            Operand count = MapWord(Const(0), GmemMapCountWord);
+            Operand bucket = context.IMultiply(context.BitwiseAnd(chunk, Const(GmemHintMask)), Const(GmemMapEntryWords));
+            Operand hintIndex = MapWord(bucket, 6);
+            Operand hintTag = MapWord(bucket, 7);
+            Operand hintFits = context.BitwiseAnd(context.ICompareNotEqual(hintIndex, Const(0)), context.ICompareEqual(hintTag, chunk));
+            hintFits = context.BitwiseAnd(hintFits, context.ICompareLessUnsigned(hintIndex, count));
+            hintFits = context.BitwiseAnd(hintFits, context.ICompareLessUnsigned(addrHigh, Const(1 << GmemHintShift)));
             Operand selected = Local();
             Operand lblFound = Label();
             context.Copy(selected, hintIndex);
             context.BranchIfTrue(lblFound, hintFits);
 
             // The last entry whose start is at or below the address (entry 0 starts at 0, so there always is one).
-            Operand index = Const(0);
-
-            for (int step = 1 << (GmemMapLog2 - 1); step != 0; step >>= 1)
+            Operand index = Local();
+            Operand step = Local();
+            context.Copy(index, Const(0));
+            context.Copy(step, context.ShiftRightU32(count, Const(1)));
+            Operand lblSearch = Label();
+            context.MarkLabel(lblSearch);
             {
-                Operand candidate = context.IAdd(index, Const(step));
+                Operand candidate = context.IAdd(index, step);
                 Operand entry = context.IMultiply(candidate, Const(GmemMapEntryWords));
                 Operand startLow = MapWord(entry, 0);
                 Operand startHigh = MapWord(entry, 1);
-
                 Operand atOrBelow = context.BitwiseOr(
                     context.ICompareLessUnsigned(startHigh, addrHigh),
                     context.BitwiseAnd(context.ICompareEqual(startHigh, addrHigh), context.ICompareLessOrEqualUnsigned(startLow, addrLow)));
-
-                index = context.ConditionalSelect(atOrBelow, candidate, index);
+                context.Copy(index, context.ConditionalSelect(atOrBelow, candidate, index));
+                context.Copy(step, context.ShiftRightU32(step, Const(1)));
             }
+            context.BranchIfTrue(lblSearch, context.ICompareNotEqual(step, Const(0)));
 
             context.Copy(selected, index);
             context.MarkLabel(lblFound);
