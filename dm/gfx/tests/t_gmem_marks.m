@@ -31,6 +31,11 @@ int main(void) { @autoreleasepool {
     table();
     CHECK("a pool with a buffer address is listed", listed(bufs) && listed(ubo));
     CHECK("and resident for the table", resident(bufs) && resident(ubo));
+    // Virtual-pool remapping registers new physical runs under the same marked guest interval.
+    mtl_pool_del(bufs); mtl_pool_add(bufs + 65536, 65536); table();
+    CHECK("a remapped run keeps the virtual range's address mark", listed(bufs + 65536) && resident(bufs + 65536));
+    CHECK("the old run is absent after remapping", !listed(bufs));
+    mtl_pool_del(bufs + 65536); mtl_pool_add(bufs, LEN); table();
     CHECK("a pool without one is not listed", !listed(texs));
     CHECK("nor resident", !resident(texs));
     // A texture in that pool: the pool walk's storage check and its upload leave the pool out of the residency set

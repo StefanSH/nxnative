@@ -360,14 +360,31 @@ class RawGlobal(Translated):
         self.has(msl, r'cp_s0\)\._m0\[2\] = ')
 
 
+class RawGlobalWrite(RawGlobal):
+    """A store through a loaded pointer must mark its full dynamic map index in the bitmap."""
+    def msl(self):
+        store = ctrl(wait=0b100, stall=4) | 0x900, 0x0000000604007386  # STG.E [R4.64], R6
+        code = b''.join(inst(*c) for c in (self.ULDC, self.ADDR_LO, self.ADDR_HI, self.LDG_PTR))
+        code += mov(6, 0x13579bdf) + inst(*store) + inst(*EXIT)
+        return self.translate(code, nvn2_cs=[3, 1, 0, 0x50, 0])
+
+    def test_the_bindings_are_the_ones_t_gmem_raw_fills(self):
+        self.has(self.msl(), r'cp_s2 \[\[id\(2\)\]\];')
+
+    def test_raw_store_has_a_bitmap_binding(self):
+        self.has(self.msl(), r'atomic_fetch_or_explicit')
+
+
 def raw_fixture(out):
     """<out>/raw.metallib: RawGlobal's shader, compiled as the build compiles (dmsh_build.py MAC_METAL), for t_gmem_raw. Exit code 77 when the translator does not run"""
     xlate = os.environ.get('DMSH_TEST_XLATE')
     if not xlate or subprocess.run([xlate, '--source-sha'], capture_output=True).returncode: sys.exit(77)
-    msl = Path(out) / 'raw.metal'; msl.write_text(RawGlobal('test_the_search_takes_the_tables_count').msl())
-    air = Path(out) / 'raw.air'
-    subprocess.run(['xcrun', '-sdk', 'macosx', 'metal', '-c', '-O1', '-fpreserve-invariance', str(msl), '-o', str(air)], check=True)
-    subprocess.run(['xcrun', '-sdk', 'macosx', 'metallib', str(air), '-o', str(Path(out) / 'raw.metallib')], check=True)
+    for name, case in [('raw', RawGlobal), ('raw-write', RawGlobalWrite)]:
+        msl = Path(out) / f'{name}.metal'; msl.write_text(case('test_the_search_takes_the_tables_count').msl())
+        air = Path(out) / f'{name}.air'
+        subprocess.run(['xcrun', '-sdk', 'macosx', 'metal', '-c', '-O1', '-fpreserve-invariance', str(msl), '-o', str(air)], check=True)
+        subprocess.run(['xcrun', '-sdk', 'macosx', 'metallib', str(air), '-o', str(Path(out) / f'{name}.metallib')], check=True)
+
 
 
 class Shared(Translated):

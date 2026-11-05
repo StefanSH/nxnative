@@ -31,7 +31,7 @@ static id<MTLBuffer> look(uint64_t a, uint64_t n) {
     return b;
 }
 int main(void) { @autoreleasepool {
-    mtl_init();
+    mtl_init(); g_gml_free = [NSMutableArray array];
     const uint64_t GB = 1ull << 30, MB = 1ull << 20;
     uint8_t *mem = mmap(NULL, GB, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0); if (mem == MAP_FAILED) abort();
     uint64_t base = (uint64_t)(uintptr_t)mem;
@@ -132,10 +132,23 @@ int main(void) { @autoreleasepool {
     CHECK("every pool's address reaches its memory", found == MANY);
     CHECK("pools past the least table are found", beyond > 0 && last >= DMSH_GMEM_MAP_ENTRIES);
     CHECK("an address in no pool finds none", gaps == MANY);
+    CHECK("grown table needs a grown bitmap", gml_bytes(map) > gml_bytes(old_map));
+    mtl_sub_begin(); uint64_t grown = gml_take(map); finish();
+    id<MTLBuffer> grown_log = nil; for (id<MTLBuffer> candidate in g_gml_free) if (candidate.gpuAddress == grown) grown_log = candidate;
+    CHECK("a small free bitmap is not reused for a grown map", grown != log.gpuAddress && grown_log.length >= gml_bytes(map));
+    id<MTLBuffer> high_log = [g_dev newBufferWithLength:gml_bytes(map) options:MTLResourceStorageModeShared];
+    memset(high_log.contents, 0, high_log.length); ((uint32_t *)high_log.contents)[last / 32] = 1u << (last % 32);
     for (int i = 0; i < MANY; i++) mtl_pool_del(many + (size_t)i * 2 * PG);
     mtl_drain();
-    mtl_sub_begin(); gmem_map().gpuAddress; finish();
+    mtl_sub_begin(); (void)gmem_map(); finish();
     CHECK("with the pools gone the table is the least again", g_gmem_buf.length / DMSH_GMEM_MAP_ENTRY == DMSH_GMEM_MAP_ENTRIES);
+    gml_read(high_log, map, -1, 0);
+    CHECK("old grown bitmap resolves after the current table shrinks", g_gml_n == 2 && g_gml_lo[1] == (uint64_t)(uintptr_t)(many + (size_t)(MANY - 1) * 2 * PG));
+    mtl_sub_begin(); uint64_t reused = gml_take(g_gmem_buf); finish();
+    CHECK("a larger bitmap may safely serve a smaller map", reused == high_log.gpuAddress);
+    const uint32_t *cleared = high_log.contents; int zero = 1;
+    for (NSUInteger i = 0; i < high_log.length / 4; i++) if (cleared[i]) zero = 0;
+    CHECK("reused bitmap clears stale high bits too", zero);
     mtl_pool_del(small); mtl_drain();
     printf("t_pool_chunks: %d checks, %d failed\n", checks, failed); return failed != 0;
 }}

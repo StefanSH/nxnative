@@ -64,10 +64,25 @@ static void eviction(void) {
     for (int i = 0; i < ALIAS_IDLE; i++) settle();
     alias_key k; memset(&k, 0, sizeof k); k.pool = (uint64_t)(uintptr_t)&pool; k.off = seen.off; k.d = seen.d;
     pthread_mutex_lock(&g_smu); nvn_hm_put(&g_alias_seen, &k, (void *)(uintptr_t)(g_fence + 1)); pthread_mutex_unlock(&g_smu);   // a lookup just now
+    g_sub_thread = pthread_self(); atomic_store(&g_sub_thread_set, 1);
+    // No live serial names these textures: only the active ghost or a retired registered view does.
+    tex_t active = rt(99606, &pool, 4 << 20, NVN_FORMAT_RGBA8), retired = rt(99607, &pool, 5 << 20, NVN_FORMAT_RGBA8);
+    mtl_tex_init(&active); mtl_tex_init(&retired);
+    mtl_sub_begin(); id<MTLTexture> active_texture = tex_mtl(&active), retired_texture = tex_mtl(&retired);
+    mtl_sub_commit(); mtl_drain();
+    mtl_tex_release(&active); mtl_tex_release(&retired);
+    pthread_mutex_lock(&g_smu); hm_put_id(&g_ghost_active, &active.serial, active_texture); pthread_mutex_unlock(&g_smu);
+    int rid = 17; mtl_reg_tex(rid, &retired, NULL);
+    os_unfair_lock_lock(&g_rmu);
+    g_treg[rid].ok = 1; g_treg[rid].retired = 1; g_treg[rid].view = (void *)CFBridgingRetain(retired_texture); os_unfair_lock_unlock(&g_rmu);
+    pthread_mutex_lock(&g_smu);
+    alias_key ak = {0}; ak.pool = (uint64_t)(uintptr_t)&pool; ak.off = active.off; ak.d = active.d; nvn_hm_del(&g_alias_seen, &ak);
+    ak.off = retired.off; ak.d = retired.d; nvn_hm_del(&g_alias_seen, &ak); pthread_mutex_unlock(&g_smu);
     id<MTLBuffer> staging = [g_dev newBufferWithLength:1 << 20 options:MTLResourceStorageModePrivate]; res_add(staging); g_up_slot_blk[1] = staging; __weak id<MTLBuffer> w_staging = staging; staging = nil;
     uint64_t idle = g_alias_idle, gen = g_ser_gen;
-    g_sub_thread = pthread_self(); atomic_store(&g_sub_thread_set, 1);
     guard_evict(1);
+    CHECK(alias_has(active_texture) && in_set(active_texture), "an active ghost stays resident");
+    CHECK(alias_has(retired_texture) && in_set(retired_texture), "a retired registered view keeps its contents resident");
     CHECK(g_alias_idle == idle + 1 && g_ser_gen == gen + 1, "one entry left, one bump");
     settle();
     CHECK(!w_dead, "the idle entry nothing holds is gone");
