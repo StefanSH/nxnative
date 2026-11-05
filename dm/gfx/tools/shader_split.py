@@ -215,21 +215,22 @@ def sead_prim_shaders(d, label):
 
 def ndsr_shaders(d, label):
     """agl's NDSR pack (Lib/agl/agl_resource.*.sarc.zs agl_ndsr.pck, Donkey Kong Bananza: the dynamic super-resolution upscaler that writes the frame's output): 'NDSR', then from +0x10
-    8-byte entries up to a zero one: u32 offset, u32 (length << 4 | type). Types 0 / 3 / 6 are a vertex, pixel or compute control section, and the entry after one is its code area (1 / 4 / 7);
-    a vertex program is followed by its pixel program. The others hold constant data: 4 bytes of it (type 9) between two programs of the variable-ratio packs put the next program
-    on an odd entry, which a walk of two entries at a time stepped over (Ocarina of Time's d17eefaff4f0bc23, 1fdc85178b60f6ce, 92918e9b7e2f89a4: the first is the SMAA blending weights of the
-    upscaler). The control section's stage byte (+0x56) and its code length (+0x44) decide the stage and the code area, as for BNSH.
-    The entries start at +0x14 in Splatoon Raiders' pack, whose header has another word and other values (+4 0x40100, against 0x300 in Bananza's), so the start is the one whose first
-    entries point at control sections. Read from +0x10 the same pack gave no shader, the upscaler's draws were skipped and every 3D frame reached the window black"""
+    16-byte records up to a zero one: u32 control section offset, u32 (control length << 4 | type), u32 code area offset, u32 (code length / 16 << 8 | type). Records whose first word
+    is an NVN2 control section are shaders (types 0 / 3 graphics, 6 compute; a vertex record is followed by its pixel record); the others (type 0xb, 0x50c) hold constant data.
+    The control section's stage byte (+0x56) and its code length (+0x44) decide the stage and the code area, as for BNSH.
+    The records start at +0x14 in Splatoon Raiders' pack, whose header has another word and other values (+4 0x40100, against 0x300 in Bananza's), so the start is the one whose first
+    records point at control sections. Read from +0x10 the same pack gave no shader, the upscaler's draws were skipped and every 3D frame reached the window black"""
     if d[:4] != b'NDSR' or len(d) < 0x20: return []
-    def entries_from(o):   # how many of the first entries point at an NVN2 control section
-        return sum(1 for c, _ in struct.iter_unpack('<2I', d[o:o + 16 * 16]) if c + 0x48 <= len(d) and nvn2_ctl(d[c:c + 0x48]))
-    out = []; o = max((0x10, 0x14), key=entries_from); prog = None
+    out = []; o = 0x10; prog = None
     while o + 16 <= len(d):
         c, cl, k, _ = struct.unpack_from('<4I', d, o)
-        if not c and not cl: break
-        o += 8
-        if not (cl & 15 in (0, 3, 6) and c + 0x48 <= len(d) and nvn2_ctl(d[c:c + 0x48])): continue
+        if not c and not cl and not k: break   # a zero record ends the table
+        # The entries are {offset, length << 4 | type} pairs (a shader's control pair, then its code pair). In Bananza's and Splatoon Raiders' packs every control pair starts a 16-byte
+        # record, read from +0x10 or +0x14; in agl_ndsr_vr.pck of The Legend of Zelda: Ocarina of Time (Switch 2, SDK 22.2.8) a constant-data pair sits between one shader's pairs and the
+        # next's, so every other control pair started in the middle of a record and the walk read 21 of its 24 shaders. This walk takes the table one 4-byte word at a time: a word that
+        # points at an NVN2 control section and is followed by a control-typed length starts a shader's two pairs, any other word moves on by one, so both layouts are read
+        if not (c + 0x48 <= len(d) and nvn2_ctl(d[c:c + 0x48]) and (cl & 0xf) in (0, 3, 6) and cl >> 4 >= 0x48): o += 4; continue
+        o += 16
         ctl = d[c:c + max(cl >> 4, 0x48)]
         code = d[k:k + struct.unpack_from('<I', ctl, 0x44)[0]]
         st = nvn2_stage(ctl, code)
@@ -240,6 +241,7 @@ def ndsr_shaders(d, label):
         elif st == 'ps' and prog: BAHS_VAR[prog] = BAHS_VAR[where] = f'{label}#NDSR#{prog.rsplit("@", 1)[1]}'; prog = None
     return out
 
+BAHS_VAR = {}   # BAHS entry label → the program variation it belongs to (bahs_variations; var_pairs pairs by it)
 def ndve_shaders(d, label):
     """The movie library's video engine pack (Movie/Ndve/Ndve-Nvn2-vid_seq5.dat.zs, The Legend of Zelda: Ocarina of Time, SDK 22: 'NDVE'): NVN2 programs laid out raw, each a 0x48-byte
     control section (version 0x14 at +8; the key takes its first 0x48 bytes) whose code area lies at the section plus +0x30 and is +0x44 bytes long; sections with 0x11 at +8 have no
