@@ -204,8 +204,11 @@ namespace Ryujinx.Graphics.Shader.Instructions
             Operand p = APred(context, x, 87, 90);
             BoolOp bop = (BoolOp)x.Bits(74, 76);
 
-            ASetPred(context, x.Bits(81, 84), GetPredLogicalOp(context, bop, cmp, p));
-            ASetPred(context, x.Bits(84, 87), GetPredLogicalOp(context, bop, context.BitwiseNot(cmp), p));
+            // Both outputs read the input predicates as they were before this instruction, even when the first output aliases p.
+            Operand res0 = GetPredLogicalOp(context, bop, cmp, p);
+            Operand res1 = GetPredLogicalOp(context, bop, context.BitwiseNot(cmp), p);
+            ASetPred(context, x.Bits(81, 84), res0);
+            ASetPred(context, x.Bits(84, 87), res1);
         }
 
         public static void AFsel(EmitterContext context)
@@ -814,8 +817,11 @@ namespace Ryujinx.Graphics.Shader.Instructions
             Operand p = APred(context, x, 87, 90, u);
             BoolOp bop = (BoolOp)x.Bits(74, 76);
 
-            ASetPred(context, x.Bits(81, 84), GetPredLogicalOp(context, bop, cmp, p), u);
-            ASetPred(context, x.Bits(84, 87), GetPredLogicalOp(context, bop, context.BitwiseNot(cmp), p), u);
+            // ISETP, UISETP and their .EX forms read both predicate results before writing either destination.
+            Operand res0 = GetPredLogicalOp(context, bop, cmp, p);
+            Operand res1 = GetPredLogicalOp(context, bop, context.BitwiseNot(cmp), p);
+            ASetPred(context, x.Bits(81, 84), res0, u);
+            ASetPred(context, x.Bits(84, 87), res1, u);
         }
 
         // IADD3 Rd, Pc0, Pc1, a, b, c: a + b + c. A negated source is its two's complement; with .X (74) its bitwise not, and the carry predicates (87..90,

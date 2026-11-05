@@ -566,7 +566,6 @@ HLE_FORCE("_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", "get a play
 HLE_FORCE("_ZN2nn5audio12ListAudioInsEPNS0_11AudioInInfoEi", "audio input device list; the host has no microphone: 0 entries", int, h_ai_List, void *info, int n) { (void)info; (void)n; return 0; }
 // SDK 22's virtual input devices (the Switch 2's microphone routing) are listed through the auddmg:u service, which the SDK's client connects to itself (hle_sf.c): The Legend of
 // Zelda: Ocarina of Time (0400486024DEC000) lists them at boot and aborted on the refused connection (Result 0xa99, sdk ListVirtualInputDevices). No microphone: none listed
-HLE_FORCE("_ZN2nn5audio23ListVirtualInputDevicesEPNS0_15AudioDeviceNameEi", "virtual audio input device list (auddmg:u); the host has no microphone: 0 entries", int, h_ai_ListVirtual, void *names, int n) { (void)names; (void)n; return 0; }
 static Result ai_open(const char *name, void *lr) {
     static _Atomic int once; char sb[64];
     if (!atomic_exchange(&once, 1)) LOG("audio input %s: the host has no microphone, the open fails (call site %s)", name ? name : "(default)", site(lr, sb, sizeof sb));
