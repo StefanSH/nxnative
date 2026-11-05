@@ -83,20 +83,23 @@ int main(void) { @autoreleasepool {
     free(lin);
     mtl_tex_release(&t);
     // Raw global memory: the table reaches all of it, and lookups then have the whole pool
+    mtl_sub_begin(); CHECK("unmarked pool table made", gmem_map() != nil); finish();
+    CHECK("unmarked large pool stays chunked", !g_big[0].full);
+    mtl_pool_buffer_addr(mem, GB);
     mtl_sub_begin(); id<MTLBuffer> old_map = gmem_map(); CHECK("pool table made", old_map != nil); finish();
     const uint64_t *ranges = old_map.contents;
     uint64_t chunk = (base + 900 * MB) >> DMSH_GMEM_HINT_SHIFT;
     size_t hint_word = (chunk % DMSH_GMEM_MAP_ENTRIES) * (DMSH_GMEM_MAP_ENTRY / sizeof(uint32_t)) + 6;
     uint32_t hint = ((const uint32_t *)old_map.contents)[hint_word];
-    unsigned entry = hint % DMSH_GMEM_MAP_ENTRIES;
+    unsigned entry = hint;
     const uint64_t *range = ranges + entry * (DMSH_GMEM_MAP_ENTRY / sizeof *ranges);
-    CHECK("the hint names its chunk and pool", entry && hint / DMSH_GMEM_MAP_ENTRIES == chunk);
+    CHECK("the hint names its chunk and pool", entry && ((const uint32_t *)old_map.contents)[hint_word + 1] == chunk);
     CHECK("the entire hinted chunk lies within its pool range", range[0] <= chunk << DMSH_GMEM_HINT_SHIFT && range[1] >= (chunk + 1) << DMSH_GMEM_HINT_SHIFT);
     CHECK("the whole pool has an entry", g_big[0].full > 0 && g_pools[g_big[0].full - 1].end == base + GB);
     CHECK("lookups take it", look(base + 900 * MB, 4096).length == GB);
     // A smaller pool is one buffer, and the removal of the large one takes all its entries
     uint8_t *small = mmap(NULL, 64 * MB, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0); if (small == MAP_FAILED) abort();
-    int n3 = g_npool; mtl_pool_add(small, 64 * MB); CHECK("one entry", g_npool == n3 + 1 && g_nbig == 1);
+    int n3 = g_npool; mtl_pool_add(small, 64 * MB); mtl_pool_buffer_addr(small, 64 * MB); CHECK("one entry", g_npool == n3 + 1 && g_nbig == 1);
     CHECK("its buffer is the whole pool", look((uint64_t)(uintptr_t)small + 10, 16).length == 64 * MB);
     mtl_pool_del(mem); mtl_drain();
     CHECK("no large pool left", g_nbig == 0);
@@ -112,7 +115,7 @@ int main(void) { @autoreleasepool {
     // More pools than DMSH_GMEM_MAP_ENTRIES (Ocarina of Time loads its save with up to about 4,500): each still has an entry, found by the search
     enum { MANY = 5000, PG = 16384 };
     uint8_t *many = mmap(NULL, (size_t)MANY * 2 * PG, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0); if (many == MAP_FAILED) abort();
-    for (int i = 0; i < MANY; i++) mtl_pool_add(many + (size_t)i * 2 * PG, PG);   // a page apart: a range each
+    for (int i = 0; i < MANY; i++) { mtl_pool_add(many + (size_t)i * 2 * PG, PG); mtl_pool_buffer_addr(many + (size_t)i * 2 * PG, PG); }   // a page apart: a range each
     mtl_sub_begin(); CHECK("pool table rebuilt", gmem_map().gpuAddress != 0); finish();
     id<MTLBuffer> map = g_gmem_buf; unsigned cap = (unsigned)(map.length / DMSH_GMEM_MAP_ENTRY); const uint32_t *mw = map.contents;
     CHECK("the table grows to a power of two that holds every pool", cap >= MANY + 2 && !(cap & (cap - 1)) && cap < 2 * (MANY + 2) && mw[4] == cap);
