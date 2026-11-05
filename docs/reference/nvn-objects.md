@@ -135,7 +135,8 @@ The game may also write into an NVN object directly, without an NVN call, throug
   - The storage check only asks whether a pool maps the storage (`mtl_addr_mapped`), and a texture's upload from an unlisted pool reads it through a buffer of its own that the upload batch retires (`up_big_src`), as for a large pool.
   - `nvn_replay` marks every captured pool, as a capture does not record the marks. `DM_NVN_GMEM_ALL=1` lists every pool, as before.
 - **Found on:** The Legend of Zelda: Ocarina of Time (Switch 2, `0400486024DEC000`, PR #1299), which makes over 4,500 pools: in Link's house on a 16 GB M5 Pro, frames from 60-65 ms to about 26 ms and the residency set from 11.7 to 9.5 GB.
-- **Check:** `t_gmem_marks`: marked pools are listed and resident, an unmarked one is neither, through the storage check and a texture upload too (its texture holds the pool's bytes), a pool marked later is listed, `DM_NVN_GMEM_ALL` lists them all. `t_pool_chunks`: a large pool is taken whole only once marked.
+- **Argument reuse:** taking a new buffer address changes the raw pool table even when the program and bindings do not change. Cached shader arguments include the atomic pool generation in their invalidation key (`args_sync_dirty`), so the next encode binds the new table. Repeating an existing mark preserves reuse.
+- **Check:** `t_gmem_marks`: marked pools are listed and resident, an unmarked one is neither, through the storage check and a texture upload too (its texture holds the pool's bytes), a pool marked later is listed and invalidates cached arguments, an unchanged mark preserves reuse, `DM_NVN_GMEM_ALL` lists them all. `t_pool_chunks`: a large pool is taken whole only once marked.
 
 ### Finalized pools kept alive by residency and the sharing table
 

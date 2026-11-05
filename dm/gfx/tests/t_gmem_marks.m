@@ -56,7 +56,12 @@ int main(void) { @autoreleasepool {
     CHECK("the texture holds what the pool holds", !memcmp(rb.contents, lin, 128 * 128 * 4));
     free(lin); mtl_tex_release(&t);
     // nvnTextureGetTextureAddress on it: from then on the pool is listed
+    args_sync_dirty(); memset(g_args_dirty, 0, sizeof g_args_dirty);
     mtl_pool_buffer_addr(texs, LEN);
+    args_sync_dirty();
+    CHECK("a newly addressable raw pool invalidates cached shader arguments", g_args_dirty[0]);
+    memset(g_args_dirty, 0, sizeof g_args_dirty); mtl_pool_buffer_addr(texs, LEN); args_sync_dirty();
+    CHECK("an unchanged address mark keeps cached arguments reusable", !g_args_dirty[0]);
     table();
     CHECK("a pool marked later is listed", listed(texs) && resident(texs));
     // DM_NVN_GMEM_ALL=1: every pool, marked or not
