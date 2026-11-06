@@ -2,7 +2,7 @@
 
 This branch of [StefanSH/nxnative](https://github.com/StefanSH/nxnative/tree/codex/oot-apple-silicon) integrates Ocarina of Time fixes on upstream `865cc35f`. The target is the Switch 2 game `0400486024DEC000`, package `v131072`, running natively on an Apple Silicon Mac through Metal. The [game note](../dm/games/0400486024DEC000/README.md) owns its build identity, profile and remaining game-specific checks.
 
-**Status: code integrated and automated checks passed; all game shaders compiled.** The host build, complete host unit suite, complete graphics suite and targeted final-source checks have passed on the Apple Silicon Mac described below. Manual Ocarina gameplay will be tested by the user; no gameplay pass is recorded for this combined branch. Other-game regression runs are also pending. Upstream gameplay reports are useful evidence for selecting fixes; they do not validate this combined branch. There is no iPhone or iPad compatibility claim for this integration.
+**Status: code integrated and automated checks passed; all game shaders compiled.** The host build, complete host unit suite, complete graphics suite and targeted final-source checks have passed on the Apple Silicon Mac described below. The packaged Mac app displayed its opening image with the full Metal HUD; see the [startup record](../dm/games/0400486024DEC000/README.md#validation) for cold prewarm time and remaining runtime diagnostics. Manual Ocarina gameplay will be tested by the user; no gameplay pass is recorded for this combined branch. Other-game regression runs are also pending. Upstream gameplay reports are useful evidence for selecting fixes; they do not validate this combined branch. There is no iPhone or iPad compatibility claim for this integration.
 
 ## Selected fixes and provenance
 
@@ -98,7 +98,7 @@ The script accepts a NUP file or its folder and prints the development run comma
 | Lint | Python ratchet: 0 new findings; LLVM 23.1.4 C/Objective-C ratchet: 0 file/check pairs above baseline after final allocation, codec and mesh corrections | Rerun for subsequent source changes |
 | Raw-memory ABI and working-set guard | GPU tests passed: pool chunks 104, raw reads/writes 73, marks 38, guard 28 plus stuck-mode 2; geometry hazards 61 in each of three modes | Gameplay memory trajectory and scene changes |
 | Full shader build | 42,850/42,850 shaders built with chain `fc2372e30191`, inputs `1cde7e5d7e83`; 55,477 Metal-cache hits and six new compilations. Zero failed shaders, unknown binding kinds or losses without failure. Four false BAHS records removed; all retained shader bytes and both pair tables preserved | Runtime coverage, first-use pipelines and visual comparison |
-| Ocarina gameplay | User-run manual testing pending; no gameplay pass recorded on this combined branch | Record machine, settings, route, actual duration, memory and screenshots |
+| Ocarina startup and gameplay | Packaged app startup and visible opening image/HUD verified; user-run manual gameplay pending, with no gameplay pass recorded | Record machine, settings, route, actual duration, memory and screenshots |
 | Other games | Impact analysis completed; five-game `regress.py check` stopped at discovery with exit 2 because only Ocarina has a local Mac build. No comparison report or green record was produced | Obtain Mac builds of Donkey Kong Bananza (raw pointers), Mario Kart World (task/mesh), Tears of the Kingdom (bindless/image atomics), and Breath of the Wild (ordinary NVN control), then rerun with Ocarina |
 | iOS | Untested | Separate unsigned build and user-run device validation |
 
@@ -109,12 +109,12 @@ For manual testing, the recommended route is a new game through the opening, mov
 Final-run record, to fill after testing:
 
 ```text
-Commit / chain / profile stamp: pending
-Mac / RAM / macOS / Xcode: pending
-Game package / module IDs: pending
-Route / duration / settings: pending
-Shader failures / new RED / GPU errors: pending
-Peak memory / alias use / frame-time percentiles: pending
+Source / chain / profile stamp: d2e37c95 / fc2372e30191 / 1cde7e5d7e83
+Mac / RAM / macOS / Xcode: Apple M2 Pro / 32 GB / 27.2 / 27.2
+Game package / module IDs: v131072 / verified profile IDs (game note)
+Route / duration / settings: opening and first scene transition observed; full manual route pending; HUD on; bulk PSO prebuild off
+Shader failures / runtime diagnostics: 0 offline failures; two open startup diagnostics in the game note
+Peak memory / alias use / frame-time percentiles: gameplay measurements pending
 Save/reload / scene transitions / focus return: pending
-Cross-game regression report: pending
+Cross-game regression report: preflight exit 2; four requested Mac builds unavailable
 ```
