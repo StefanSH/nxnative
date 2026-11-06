@@ -133,6 +133,17 @@ class CompileDatabase(unittest.TestCase):
         self.assertEqual(lint.entries(REPO / 'dm/host', 'ar rcs libx.a a.o', ''), [])
         self.assertEqual(lint.entries(REPO / 'dm/host', 'clang -c x.c', '/sdk')[0]['arguments'][:3], ['clang', '-isysroot', '/sdk'])   # the SDK added when make gives none
 
+    def test_continued_make_command_keeps_the_test_include_paths(self):
+        # The codec test's real make recipe spans two lines. Parsing each printed line lost its entire compile command.
+        stdout = 'clang -O1 -I../../third_party/libvpx -o build/t_codec_video t_codec_video.c ' + chr(92) + chr(10) + '  -framework VideoToolbox\n'
+        with mock.patch.object(lint.subprocess, 'run', return_value=mock.Mock(stdout=stdout)):
+            commands = lint.dry_run('dm/host/tests', [], '0400486024DEC000')
+        entries = [e for cwd, line in commands for e in lint.entries(cwd, line, '/sdk')]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['file'], str(REPO / 'dm/host/tests/t_codec_video.c'))
+        self.assertIn('-I../../third_party/libvpx', entries[0]['arguments'])
+        self.assertNotIn('-framework', entries[0]['arguments'])
+
     def test_first_command_of_a_source_wins_and_third_party_is_left_out(self):
         def e(f, flag): return {'directory': str(REPO), 'file': str(REPO / f), 'arguments': ['clang', flag, '-c', str(REPO / f)]}
         db = lint.merge_entries([e('dm/host/loader.c', '-DHOST'), e('dm/gfx/vk/hle_vk.m', '-DHOST'), e('dm/host/loader.c', '-DTEST'),

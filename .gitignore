@@ -11,3 +11,10 @@ dm/games/*/cb_extent.tsv
 .coverage
 .coverage.*
 /coverage.json
+
+# Game containers and private console keys stay outside the source checkout.
+*.[nN][uU][pP]
+*.[nN][sS][pP]
+*.[xX][cC][iI]
+prod.keys
+title.keys

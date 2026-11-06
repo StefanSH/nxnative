@@ -456,6 +456,7 @@ static int cap_digest(const tex_t *t, uint8_t md[32], uint64_t *bytes, uint32_t 
     int bpp = cap_pf_bpp(mt.pixelFormat, 0); if (!bpp) return 0;
     size_t row = mt.width * (size_t)bpp, n = row * mt.height;
     id<MTLBuffer> b = [g_dev newBufferWithLength:n options:MTLResourceStorageModeShared];
+    if (!b) { MLOG("[RED] capture readback: cannot allocate %zu bytes", n); return 0; }
     id<MTLCommandBuffer> cb = q_cb(); id<MTLBlitCommandEncoder> e = [cb blitCommandEncoder];
     [e copyFromTexture:mt sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(mt.width, mt.height, 1) toBuffer:b destinationOffset:0 destinationBytesPerRow:row destinationBytesPerImage:n];
     [e endEncoding]; [cb commit]; [cb waitUntilCompleted];

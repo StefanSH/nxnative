@@ -52,6 +52,24 @@ static double g_test_now;
 static double test_clock(void) { return g_test_now; }
 
 int main(void) {
+    {   // Odd requested dimensions still need complete NV12 U/V pairs and chroma rows; scratch padding is excluded from the cropped I420 picture.
+        const unsigned dims[][2] = {{3, 1}, {2, 3}, {3, 3}, {4, 2}};
+        for (unsigned i = 0; i < sizeof dims / sizeof *dims; i++) {
+            unsigned w = dims[i][0], h = dims[i][1], stride = (w + 1) & ~1u, rows = (h + 1) & ~1u;
+            size_t bytes = (size_t)stride * rows * 3 / 2; uint8_t *nv12 = malloc(bytes); assert(nv12); memset(nv12, 0xee, bytes);
+            for (unsigned y = 0; y < h; y++) for (unsigned x = 0; x < w; x++) nv12[(size_t)y * stride + x] = (uint8_t)(16 + y * 8 + x);
+            uint8_t *uv = nv12 + (size_t)stride * rows;
+            for (unsigned y = 0; y < (h + 1) / 2; y++) for (unsigned x = 0; x < (w + 1) / 2; x++) {
+                uv[(size_t)y * stride + 2 * x] = (uint8_t)(90 + y * 8 + x); uv[(size_t)y * stride + 2 * x + 1] = (uint8_t)(140 + y * 8 + x); }
+            vpx_image_t *c = nv12_to_i420(nv12, w, h, stride, rows); assert(c && c->d_w == w && c->d_h == h);
+            for (unsigned y = 0; y < h; y++) for (unsigned x = 0; x < w; x++) assert(c->planes[0][(size_t)y * c->stride[0] + x] == 16 + y * 8 + x);
+            for (unsigned y = 0; y < (h + 1) / 2; y++) for (unsigned x = 0; x < (w + 1) / 2; x++) {
+                assert(c->planes[1][(size_t)y * c->stride[1] + x] == 90 + y * 8 + x); assert(c->planes[2][(size_t)y * c->stride[2] + x] == 140 + y * 8 + x); }
+            if (w < stride) assert(nv12[w] == 0xee);
+            if (h < rows) assert(nv12[(size_t)h * stride] == 0xee);
+            vpx_img_free(c); free(nv12);
+        }
+    }
     _Alignas(16) static uint8_t dec[0x400], pool[3][0x40], spt[0x80], mem[16 * 16 * 4];
     uint64_t size, align, id; uint32_t idx; cv_sync sync; uint16_t w, h, cw, ch; int64_t ts; bool eos;
 
@@ -242,8 +260,8 @@ int main(void) {
         for (uint64_t k = 0; k < nz; k++) assert(!nm[k]);
         dm_native_image_blank_free(a); assert(!dm_native_image(a, &nm, &nz, &nw, &nh, &ns)); assert(dm_native_image(b, &nm, &nz, &nw, &nh, &ns));
         dm_native_image_blank_free(b); dm_native_image_blank_free(b); dm_native_image_blank_free(0x100);   // twice, and a decoder pool's handle: nothing happens
-        uint32_t k[BLANK_MAX + 1]; for (int i = 0; i < BLANK_MAX; i++) assert((k[i] = dm_native_image_blank(32, 32)));
-        assert(!(k[BLANK_MAX] = dm_native_image_blank(32, 32)));   // full
+        uint32_t k[BLANK_MAX + 1]; for (int i = 0; i < BLANK_MAX; i++) { k[i] = dm_native_image_blank(32, 32); assert(k[i]); }
+        k[BLANK_MAX] = dm_native_image_blank(32, 32); assert(!k[BLANK_MAX]);   // full
         for (int i = 0; i < BLANK_MAX; i++) dm_native_image_blank_free(k[i]);
     }
 

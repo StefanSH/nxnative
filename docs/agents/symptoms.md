@@ -354,6 +354,7 @@ One line per symptom in the [subsystem references](../reference/): what you see 
 - a movie stays black with the game waiting behind it, the decoder made and no `first picture` line (`Submit…InputBuffer` never called). Or `[RED] nn::codec VP9: Corrupt frame detected`, then `Keyframe / intra-only frame required`, each time about 6 s into a movie or after skipping in one. → [The submission-ready event counted as packets](../reference/movies.md#the-submission-ready-event-counted-as-packets)
 - a crash in `nn::codec::video::InitializeAv1DecoderByTransferMemory` when a movie starts. → [AV1 movies through SDK 22's decoder](../reference/movies.md#av1-movies-through-sdk-22s-decoder)
 - an abort in `nn::codec` (the SDK's own decoder client, which opens a service the host does not have) when a movie starts in a game built with SDK 19 for the Switch 2. → [SDK 19's decoder forms](../reference/movies.md#sdk-19s-decoder-forms)
+- ASan reports a read past the H.264 scratch allocation while converting a 3x1 or 2x3 NV12 picture to I420. → [Odd-sized H.264 NV12 scratch pictures](../reference/movies.md#odd-sized-h264-nv12-scratch-pictures)
 
 ## Audio
 

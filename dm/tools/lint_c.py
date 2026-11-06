@@ -56,7 +56,8 @@ def make_targets(d):
 def dry_run(d, targets, game):
     r = subprocess.run(['make', '-n', '-B', '-k', '-w', f'GAME={game}', *targets], cwd=REPO / d, capture_output=True, text=True)
     dirs, out = [REPO / d], []   # make -w names the folder each recursive make enters and leaves
-    for line in r.stdout.split('\n'):
+    # make prints continued shell commands across lines; parse the command after the shell's backslash-newline removal.
+    for line in r.stdout.replace('\\\n', '').split('\n'):
         m = re.match(r"make(?:\[\d+\])?: (Entering|Leaving) directory [`']([^']+)'", line)
         if m:
             if m.group(1) == 'Entering': dirs.append(pathlib.Path(m.group(2)))

@@ -348,13 +348,13 @@ static int cv_hold(cv_dec *d, vpx_image_t *c, int64_t ts) {   // a decoded pictu
     if (d->nheld >= CV_HOLD + CV_BURST) { static int n; if (n++ < 4) LOG("[RED] nn::codec %s: a packet gave more pictures than the host holds: one dropped", k_cv_name[d->codec]); vpx_img_free(c); return 0; }
     d->held[d->nheld] = c; d->held_ts[d->nheld] = ts; d->held_eos[d->nheld] = 0; d->nheld++; return 1;
 }
-static vpx_image_t *nv12_to_i420(const uint8_t *nv12, unsigned w, unsigned h) {   // VideoToolbox's NV12 as the I420 the pool keeps
+static vpx_image_t *nv12_to_i420(const uint8_t *nv12, unsigned w, unsigned h, unsigned stride, unsigned rows) {   // an even-sized NV12 scratch picture, cropped to the requested I420 dimensions
     vpx_image_t *c = vpx_img_alloc(NULL, VPX_IMG_FMT_I420, w, h, 1); if (!c) return NULL;
-    for (unsigned y = 0; y < h; y++) memcpy(c->planes[0] + (size_t)y * c->stride[0], nv12 + (size_t)y * w, w);
-    const uint8_t *uv = nv12 + (size_t)w * h;
+    for (unsigned y = 0; y < h; y++) memcpy(c->planes[0] + (size_t)y * c->stride[0], nv12 + (size_t)y * stride, w);
+    const uint8_t *uv = nv12 + (size_t)stride * rows;
     for (unsigned y = 0; y < (h + 1) / 2; y++) for (unsigned x = 0; x < (w + 1) / 2; x++) {
-        c->planes[1][(size_t)y * c->stride[1] + x] = uv[(size_t)y * w + 2 * x];
-        c->planes[2][(size_t)y * c->stride[2] + x] = uv[(size_t)y * w + 2 * x + 1]; }
+        c->planes[1][(size_t)y * c->stride[1] + x] = uv[(size_t)y * stride + 2 * x];
+        c->planes[2][(size_t)y * c->stride[2] + x] = uv[(size_t)y * stride + 2 * x + 1]; }
     return c;
 }
 static vpx_image_t *av1_to_i420(const mav1_picture *p) {   // the decoder's NV12, rows at its strides, as the I420 the pool keeps
@@ -375,8 +375,11 @@ static Result cv_dec_submit(uint64_t *out, void *t, const void *data, uint64_t s
     int got = 0;
     if (d->codec == CV_H264 && d->avc) {   // VideoToolbox reorders: pictures leave in presentation order, all of them at the end of the stream
         if (size && mavc_decode(d->avc, data, (int)size, ts / 1000) < 0) { static int n; if (n++ < 4) LOG("[RED] nn::codec H.264: VideoToolbox could not decode a packet"); }
-        uint8_t *nv12 = malloc((size_t)d->w * d->h * 3 / 2); int64_t pts = 0;
-        while (nv12 && d->nheld < CV_HOLD && mavc_take(d->avc, eos, nv12, d->w, d->h, &pts) == 1) { vpx_image_t *c = nv12_to_i420(nv12, d->w, d->h); if (c) got += cv_hold(d, c, pts * 1000); }
+        // NV12 has a complete U/V pair and chroma row for an odd final luma column/row. Decode to an even scratch size, then crop to the requested picture.
+        unsigned stride = ((unsigned)d->w + 1) & ~1u, rows = ((unsigned)d->h + 1) & ~1u;
+        uint8_t *nv12 = malloc((size_t)stride * rows * 3 / 2); int64_t pts = 0;
+        while (nv12 && d->nheld < CV_HOLD && mavc_take(d->avc, eos, nv12, (int)stride, (int)rows, &pts) == 1) {
+            vpx_image_t *c = nv12_to_i420(nv12, d->w, d->h, stride, rows); if (c) got += cv_hold(d, c, pts * 1000); }
         free(nv12);
     } else if (d->codec == CV_AV1) {
         // Decoded without the decoder lock: dav1d's frame threads can keep a packet waiting tens of milliseconds for a free frame, and under the lock the game's Release and

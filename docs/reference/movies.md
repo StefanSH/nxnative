@@ -308,3 +308,11 @@ A decoder hands out as many outputs as it has slots, and while every slot is tak
 - Unity's `Hidden/VideoDecode` samples luma as `.w` of an `R8` texture with the swizzle `(0, 0, 0, R)` (Unity's Alpha8) and chroma from an `RG8` texture at half size; both are CPU-written block-linear textures ([nvn-objects.md](nvn-objects.md)).
 - **Check:** to check the movie path apart from the decoder, fill the frames with a gradient in `hle_movie.c`; it should appear on screen.
 - **Found on:** [Fire Emblem Engage](../../dm/games/0100A6301214E000/README.md).
+
+### Odd-sized H.264 NV12 scratch pictures
+
+- **Symptom:** ASan reports a read past the H.264 scratch allocation while converting a 3x1 or 2x3 NV12 picture to I420.
+- **Cause:** `w * h * 3 / 2` and a chroma stride of `w` truncate the final interleaved chroma pair or row for odd dimensions. The converter reads the complete ceil-sized chroma planes.
+- **Fix:** the codec decoder rounds its temporary NV12 width and height up to even values, passes those stored dimensions to the existing movie decoder, and crops to the requested picture using explicit stored stride and rows. Other movie callers and the shared output API keep their layout.
+- **Check:** `t_codec_video` verifies sample, chroma and padding values for 3x1, 2x3, 3x3 and 4x2 pictures. The original helper and allocation fail ASan for 3x1 and 2x3; the fixed helper passes all four cases.
+- **Found on:** synthetic validation during the [Ocarina of Time integration](../../dm/games/0400486024DEC000/README.md). Ocarina's opening is AV1; this H.264 defect was not observed in its gameplay.
