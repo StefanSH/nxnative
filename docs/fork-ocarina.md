@@ -2,7 +2,7 @@
 
 This branch of [StefanSH/nxnative](https://github.com/StefanSH/nxnative/tree/codex/oot-apple-silicon) integrates Ocarina of Time fixes on upstream `865cc35f`. The target is the Switch 2 game `0400486024DEC000`, package `v131072`, running natively on an Apple Silicon Mac through Metal. The [game note](../dm/games/0400486024DEC000/README.md) owns its build identity, profile and remaining game-specific checks.
 
-**Status: integration and validation in progress.** The host and selected synthetic Metal tests have passed on the foundation described below. A complete shader build, gameplay on the final memory integration, and cross-game regression runs are pending. Upstream reports of gameplay are useful evidence for selecting fixes; they do not validate this combined branch. There is no iPhone or iPad compatibility claim for this integration.
+**Status: code integrated and automated checks passed; all game shaders compiled.** The host build, complete host unit suite, complete graphics suite and targeted final-source checks have passed on the Apple Silicon Mac described below. Manual Ocarina gameplay will be tested by the user; no gameplay pass is recorded for this combined branch. Other-game regression runs are also pending. Upstream gameplay reports are useful evidence for selecting fixes; they do not validate this combined branch. There is no iPhone or iPad compatibility claim for this integration.
 
 ## Selected fixes and provenance
 
@@ -28,9 +28,12 @@ The table identifies upstream sources. Cherry-picks and conflict resolution give
 | [#1360](https://github.com/seedds/nxnative/pull/1360), `eaa7a1daed0e`; [#1394](https://github.com/seedds/nxnative/pull/1394), `a885f4be50b4` | Grow the raw-memory pool table and restrict residency to pools whose GPU addresses the game obtained. Reconcile both with #1299's write bitmap and lookup hints as one host/translator ABI. Synthetic GPU integration checks passed on M2 Pro; gameplay remains pending. |
 | [#1391](https://github.com/seedds/nxnative/pull/1391), `5122c24de6ec`; [#1392](https://github.com/seedds/nxnative/pull/1392), `8cf269120187` | Guard residency commits against the working-set limit and retire replaced buffers when no submission is advancing. Synthetic GPU integration checks passed on M2 Pro; gameplay remains pending. |
 | [#1374](https://github.com/seedds/nxnative/pull/1374), `9e2199cfd30e` | Repair the existing Python ratchet failure in the function-matching tests. |
+| [#1275](https://github.com/seedds/nxnative/pull/1275), narrow port from `6f9733800b5f` | Implement 32-bit Ampere `ATOMG.CAS` (`0x3a9`) through the existing atomic compare-and-swap IR and raw-memory ABI. All six affected Foliage compute programs translate and Metal-compile; 80 Ampere memory tests and 72 GPU CAS checks passed. Unsupported widths and uniform-address forms fail explicitly. |
 | Local fix, `d2110ef6` | Compute both ISETP/UISETP/FSETP predicate results before writing either output; prepare the verified package identity and larger alias region. See [the predicate finding](reference/shaders.md#dual-predicate-outputs-read-their-original-inputs). |
 
 A local follow-up also invalidates cached shader arguments when pool addressability changes. Its late-mark regression failed before the fix and passed after it. The memory changes need joint tests: a table which grows correctly must still retain every address reachable by a shader, and its hint indices and write bitmap must agree with its capacity. A clean text merge alone is insufficient. The working-set guard limits the consequences of excessive GPU memory; it does not establish that the game's memory use is bounded.
+
+The final extraction check also resolved [BAHS control fields mistaken for shader descriptors](reference/shaders.md#bahs-control-and-metadata-words-mistaken-for-shader-descriptors). The complete resplit removes four false entries without changing any retained shader bytes, facts or program-pair tables.
 
 Local validation also corrected an independent [odd-sized H.264 NV12 scratch allocation](reference/movies.md#odd-sized-h264-nv12-scratch-pictures), capture/replay allocation failures, and compile-database parsing of continued Make commands. The H.264 overflow is proven with ASan; it is not presented as a cause of Ocarina's AV1 behavior.
 
@@ -82,22 +85,26 @@ GAME_FOLDER=/path/to/OcarinaOfTime
 python3 scripts/build_ipa_from_nsp.py "$GAME_FOLDER" --package v131072 --platform mac --no-seen-shaders
 ```
 
-The script accepts a NUP file or its folder and prints the development run command. It needs no keys for a NUP. After the full build and gameplay checks pass, `--platform mac-app` packs a Finder-launchable app. The shader translator, lock, chain header, stamped game libraries and host must come from the same integration; do not mix libraries from individual PRs.
+The script accepts a NUP file or its folder and prints the development run command. It needs no keys for a NUP. Use `--platform mac-app` to pack a Finder-launchable app for manual testing. The shader translator, lock, chain header, stamped game libraries and host must come from the same integration; do not mix libraries from individual PRs.
 
 | Check | Recorded result | Remaining evidence |
 | --- | --- | --- |
 | Package identity | Supplied `v131072` module IDs matched the profile | Recheck when changing the input build |
-| Host | Foundation and combined-memory host builds and complete host unit suites passed on Apple M2 Pro, macOS 27.2, Xcode 27.2 | Final rebuild after lint-only and capture allocation corrections |
-| Synthetic Metal foundation | Eight targets passed: mesh indirect, image usage, deferred release, pipeline warm/key, NDVE movie, CPU texture and CPU storage | Full Metal suite on the final integration |
-| Shader chain | Rebuilt bundled translator and lock verified; chain `ac48fdb87d7c`; 265 shader tests passed, 2 skipped, including 80 predicate cases | Full game library build and runtime shader coverage |
-| Profile and extraction tests | 21 focused tests and 19 final docs/profile checks passed; complete tool run: 1,287 tests, 23 skipped, one environment-table failure corrected and its targeted test passed | Final Python/C lint after remaining validation corrections |
+| Host | Final host rebuild and complete host unit suite passed on Apple M2 Pro (32 GB), macOS 27.2, Xcode 27.2; foundation validation source `2420052e`, followed by the verified BAHS/CAS changes | Manual game startup and behavior |
+| Graphics suite | Complete graphics suite passed in 1,349.2 seconds; final PSO-key and live capture/replay checks passed, with both fresh replays matching the live frame | Real-game rendering and performance |
+| Final targeted checks | Odd-NV12 ASan regression passed; rebuilt codec-video tests passed; native mesh rasterization passed all 8 classic/Metal 4, direct/indirect and zero/nonzero-work cases (60 checks) | Runtime coverage of the corresponding game paths |
+| Shader chain | Rebuilt bundled translator and lock verified; chain `fc2372e30191`; 269 shader tests passed, 2 skipped, including 80 predicate cases and the new CAS regressions | Runtime shader and pipeline coverage |
+| Profile and extraction tests | 21 focused tests and 19 final docs/profile checks passed; complete tool run: 1,287 tests, 23 skipped, one environment-table failure corrected and its targeted test passed; 32 final source checks passed | Recheck when changing the package or generated metadata |
+| Lint | Python ratchet: 0 new findings; LLVM 23.1.4 C/Objective-C ratchet: 0 file/check pairs above baseline after final allocation, codec and mesh corrections | Rerun for subsequent source changes |
 | Raw-memory ABI and working-set guard | GPU tests passed: pool chunks 104, raw reads/writes 73, marks 38, guard 28 plus stuck-mode 2; geometry hazards 61 in each of three modes | Gameplay memory trajectory and scene changes |
-| Full shader build | Complete extraction: 42,854 shaders, including three newly discovered compute programs; offline compilation running | Record input stamp, compiled totals and every failed key |
-| Ocarina gameplay | Pending on this combined branch | Record machine, settings, route, duration, memory and screenshots |
-| Other games | Impact analysis completed; other game files are not available locally | Check Ocarina, Donkey Kong Bananza (raw pointers), Mario Kart World (task/mesh), Tears of the Kingdom (bindless/image atomics), and Breath of the Wild (ordinary NVN control), with a harness report |
+| Full shader build | 42,850/42,850 shaders built with chain `fc2372e30191`, inputs `1cde7e5d7e83`; 55,477 Metal-cache hits and six new compilations. Zero failed shaders, unknown binding kinds or losses without failure. Four false BAHS records removed; all retained shader bytes and both pair tables preserved | Runtime coverage, first-use pipelines and visual comparison |
+| Ocarina gameplay | User-run manual testing pending; no gameplay pass recorded on this combined branch | Record machine, settings, route, actual duration, memory and screenshots |
+| Other games | Impact analysis completed; five-game `regress.py check` stopped at discovery with exit 2 because only Ocarina has a local Mac build. No comparison report or green record was produced | Obtain Mac builds of Donkey Kong Bananza (raw pointers), Mario Kart World (task/mesh), Tears of the Kingdom (bindless/image atomics), and Breath of the Wild (ordinary NVN control), then rerun with Ocarina |
 | iOS | Untested | Separate unsigned build and user-run device validation |
 
-The gameplay route must cover a new game, the full opening, movement in Link's house and Kokiri Forest, repeated house/forest transitions, save creation and reload, focus loss and return, and at least 45–60 minutes of play. Record GPU allocation, residency, guest footprint, alias high-water marks, frame-time percentiles and new `[RED]` lines. Confirm terrain, foliage, door attributes, fog, exposure, movie reconstruction and dynamic-resolution transitions. A short high-FPS scene is not sufficient for acceptance.
+The manual-test app enables the Metal HUD (device, resolution, process/Metal memory, FPS, frame interval, GPU time, Metal CPU encoding time, thermal state and shader compilation, with metric ranges). Memory and per-thread CPU samples are also saved beside the build. It uses `DM_PSO_PREBUILD=0`: the profile’s warm seeds and required on-demand pipelines remain enabled, while first-use pipeline stalls can still occur. No bulk offline pipeline archive is bundled for this first run.
+
+For manual testing, the recommended route is a new game through the opening, movement in Link's house and Kokiri Forest, house/forest transitions, save creation and reload, and focus loss and return. Follow with a longer play session when practical and record its actual duration. Observe terrain, foliage, door attributes, fog, exposure, movie reconstruction and dynamic-resolution transitions. Where available, retain GPU allocation, residency, guest footprint, alias use, frame-time percentiles and new `[RED]` lines alongside screenshots. A short high-FPS scene does not establish long-run memory behavior.
 
 Final-run record, to fill after testing:
 

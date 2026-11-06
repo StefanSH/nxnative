@@ -29,6 +29,7 @@ namespace Ryujinx.Graphics.Shader.Instructions
             x(0x98e, InstName.Red, ARed, N, writesRd: false);
             x(0x9a8, InstName.Atom, AAtomg, N);
             x(0x3a8, InstName.Atom, AAtomg, N);
+            x(0x3a9, InstName.AtomCas, AAtomgCas, N);
             x(AmpereOpcodes.Ldl, InstName.Ldl, ALdLocalShared, N);
             x(0x984, InstName.Lds, ALdLocalShared, N);
             x(0x387, InstName.Stl, AStLocalShared, N, writesRd: false);
@@ -367,6 +368,23 @@ namespace Ryujinx.Graphics.Shader.Instructions
             Operand res = EmitAtomicOp(context, StorageKind.GlobalMemory, (AtomOp)x.Bits(87, 91), (AtomSize)x.Bits(73, 76), lo, hi, Register(x.Rb, RegisterType.Gpr));
 
             ASet(context, x, res);
+        }
+
+        // ATOMG.CAS Rd, [Ra + offset], Rb, Rc: compare Rb, replace with Rc and return the old value (Mesa NAK OpAtom).
+        // Ported from nxnative PR #1275's Ampere work. Only 32-bit forms are supported; .E selects Ra's 64-bit address pair.
+        public static void AAtomgCas(EmitterContext context)
+        {
+            AmpereOp x = new(context.CurrOp);
+
+            if (x.Bits(73, 76) > 1 || x.Bit(91))
+            {
+                throw AFail(context, $"ATOMG.CAS type {x.Bits(73, 76)} or uniform address");
+            }
+
+            (Operand lo, Operand hi) = AGlobalAddress(context, x, 72, 64, 0);
+            Operand result = context.AtomicCompareAndSwap(StorageKind.GlobalMemory, lo, hi, AGpr(x.Rb), AGpr(x.Rc));
+
+            ASet(context, x, result);
         }
 
         // MEMBAR: the order of this thread's memory operations

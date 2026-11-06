@@ -194,7 +194,8 @@ def bahs_shaders(d, label):
         st = nvn2_stage(ctl, code) if nvn2 else 'cs' if code[:4] == CS_MAGIC else sph_stage(code) if code[:4] == GFX_MAGIC else None
         if not st or check(label, st, ctl, code): continue
         out.append((f'{label}#BAHS@{a:#x}', st, ctl, code))
-    bahs_variations(d, label, [o[0] for o in out])
+    records = bahs_variations(d, label, [o[0] for o in out])
+    if records is not None: out = [o for o in out if int(o[0].rsplit('@', 1)[1], 16) in records]
     return out
 
 def sead_prim_shaders(d, label):
@@ -280,7 +281,8 @@ def bahs_variations(d, label, entries):
     (0 vertex, 1 fragment, 3 compute), two u32, the 16-byte entry bahs_shaders reads) and right after it a program array (u32 byte size, u32 count, then per program: u32 record size,
     u32 name length, u32 stage mask, u32 index of its first binary, its name, its macros). A program's binaries run from its first index to the next program's; the n-th vertex binary
     and the n-th fragment binary in that range are one variation. Breath of the Wild: 109 of the 543 pairs drawn on a cold start in Zora's Domain came from these files, and none was in
-    shader_pairs.tsv, which paired only BNSH variations. A file whose arrays do not read back (another layout, or an entry bahs_shaders took that no record holds) gives no pairs"""
+    shader_pairs.tsv, which paired only BNSH variations. Returns the descriptor offsets when the binary array reads back, even if its program array does not; the caller
+    then rejects scan matches inside controls instead of treating their length fields as shader descriptors. Unknown layouts keep the scan's candidates and give no pairs"""
     if not entries: return
     taken = {int(e.rsplit('@', 1)[1], 16) for e in entries}
     arr = min(taken) - 0x18
@@ -291,20 +293,20 @@ def bahs_variations(d, label, entries):
     for _ in range(acnt):
         if o + 0x20 > arr + asz: return
         rs, kind = struct.unpack_from('<II', d, o)
-        if rs < 0x20: return
+        if rs < 0x20 or rs > arr + asz - o: return
         recs.append((o + 0x10, kind)); o += rs
-    # every entry bahs_shaders took is a record's, but for a stray match of its scan (Donkey Kong Bananza's agl_common: 1,556 taken, 1,555 records): up to 1 % may lie
-    # outside the array; only the records' entries are paired
+    # Controls can mimic descriptors: Ocarina's agl_common control +0x38 holds {instruction length, 0, aligned length, code length}. Only the array's records are shaders.
     if o != arr + asz or len(taken - {a for a, _ in recs}) > max(1, len(taken) // 100): return
+    records = {a for a, _ in recs}
     psz, pcnt = struct.unpack_from('<II', d, o)
-    if o + psz > len(d) or not pcnt: return
+    if o + psz > len(d) or not pcnt: return records
     q, bases = o + 8, []
     for _ in range(pcnt):
-        if q + 16 > o + psz: return
+        if q + 16 > o + psz: return records
         rs, _nl, _mask, base = struct.unpack_from('<IIII', d, q)
-        if rs < 16 or base > acnt or (bases and base < bases[-1]): return
+        if rs < 16 or rs > o + psz - q or base > acnt or (bases and base < bases[-1]): return records
         bases.append(base); q += rs
-    if q != o + psz: return
+    if q != o + psz: return records
     bases.append(acnt)
     for p in range(pcnt):
         seen = [0, 0]
@@ -313,6 +315,7 @@ def bahs_variations(d, label, entries):
             if k > 1: continue   # compute and the other kinds pair with nothing
             if a in taken: BAHS_VAR[f'{label}#BAHS@{a:#x}'] = f'{label}#BAHS#prog{p}#var{seen[k]}'
             seen[k] += 1
+    return records
 
 def mshd_shaders(d, label):
     out, c = [], d.find(CTL_MAGIC)

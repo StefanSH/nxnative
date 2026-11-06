@@ -409,6 +409,55 @@ def raw_fixture(out):
 
 
 
+class GlobalCas(Translated):
+    """ATOMG.CAS compares Rb, installs Rc and returns the old word; source aliases must survive Rd's write."""
+    @staticmethod
+    def code(raw=False, rd=8, expected=5, desired=9):
+        prefix = b''.join(inst(*c) for c in (RawGlobal.ULDC, RawGlobal.ADDR_LO, RawGlobal.ADDR_HI))
+        if raw: prefix += inst(*RawGlobal.LDG_PTR)
+        cas = ctrl(wb=3, wait=4 if raw else 0) | 0x1ee10b, 10 << 32 | (4 if raw else 2) << 24 | rd << 16 | 0x73a9
+        store = ctrl(wait=8, stall=4) | 0x900, 8 << 40 | rd << 32 | 2 << 24 | 0x7386
+        return prefix + mov(10, expected) + mov(11, desired) + inst(*cas) + inst(*store) + inst(*EXIT)
+
+    def msl(self, **kwargs):
+        return self.translate(self.code(**kwargs), nvn2_cs=[3, 1, 0, 0x50, 0])
+
+    def test_bound_cas_keeps_expected_new_and_old_result(self):
+        msl = self.msl()
+        self.assertIn('atomic_compare_exchange_weak_explicit', msl)
+        self.assertRegex(msl, r'= 5u;')
+        self.assertRegex(msl, r', 9u,')
+        self.assertRegex(msl, r'cp_s0\)\._m0\[2\] = ')
+
+    def test_rd_alias_does_not_change_either_input(self):
+        for rd in (10, 11):
+            with self.subTest(rd=rd):
+                msl = self.msl(rd=rd)
+                self.assertRegex(msl, r'= 5u;')
+                self.assertRegex(msl, r', 9u,')
+
+    def test_raw_cas_uses_the_dynamic_map_and_write_bitmap(self):
+        msl = self.msl(raw=True)
+        self.assertIn('atomic_compare_exchange_weak_explicit', msl)
+        self.assertRegex(msl, r'cp_s1 \[\[id\(1\)\]\]')
+        self.assertRegex(msl, r'cp_s2 \[\[id\(2\)\]\]')
+        self.assertIn('atomic_fetch_or_explicit', msl)
+        self.assertRegex(msl, r'= 5;')
+        self.assertRegex(msl, r'= 9;')
+
+
+    def test_unsupported_width_and_uniform_address_are_rejected(self):
+        for extra_bits in (2 << 9, 1 << 27):
+            with self.subTest(extra_bits=extra_bits):
+                code = bytearray(self.code())
+                for at in range(0, len(code), 16):
+                    lo, hi = struct.unpack_from('<QQ', code, at)
+                    if lo & 0xfff == 0x3a9:
+                        struct.pack_into('<QQ', code, at, lo, hi | extra_bits)
+                with self.assertRaisesRegex(AssertionError, 'ATOMG.CAS type'):
+                    self.translate(code, nvn2_cs=[3, 1, 0, 0x50, 0])
+
+
 class Shared(Translated):
     """Fire Emblem Fortune's Weave's Lighting compute shaders: the exposure histogram and its 64-bit average, in the game's own encodings"""
     STS_SCALED_4 = 0x000fe80000004800, 0x0000000302027388   # STS.U32 [R2 * 4], R3 (6d0f6db3f0d396a3 +0x80 with a value): R2 counts words. Read unscaled, bin b came back at about 4b

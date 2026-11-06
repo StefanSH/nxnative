@@ -66,6 +66,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Pairing:** control sections are shared between programs, so pair by entry, never by searching for code near a control.
 - **Found on:** [Super Mario 3D World + Bowser's Fury](../../dm/games/010028600EBDA000/README.md) (BAHS version 9).
 
+### BAHS control and metadata words mistaken for shader descriptors
+
+- **Symptom:** the shader split adds programs outside a BAHS binary array's descriptors; a bogus compute program then fails translation on opcode `0x481`.
+- **Cause:** the aligned-word scan can interpret control lengths or other record metadata as `{code offset, zero, control size, relative control offset}`. Such words can point to an unrelated real control and code area, passing the magic and span checks without identifying a shader descriptor. A vertex SPH can consequently be decoded as a compute instruction.
+- **Fix:** when the BAHS binary array reads back, `bahs_variations` returns its descriptor offsets and `bahs_shaders` filters scan candidates against them. Every record must fit the declared array and traversal must end exactly at its boundary. This proof remains usable when the following program array cannot be read; unknown binary-array layouts retain the existing scan. No shader key or game-specific exclusion is needed. `shader_split.py` is outside `DMSH_CHAIN`, but changed packages and profile tables still require a coherent full shader build and new input stamp.
+- **Check:** `test_split_bahs_records.py` reproduces a control-length false descriptor and checks valid stage bytes and pairings, a missing program array, unknown and malformed arrays, and a Maxwell control layout. The original splitter fails the two false-descriptor cases; the corrected splitter passes all five.
+- **Found on:** [Ocarina of Time](../../dm/games/0400486024DEC000/README.md#found-on-this-game), whose full resplit also exposed false candidates in other BAHS resource records.
+
 ### Zstd files recognised by their magic
 
 - **Symptom:** `shader_split.py` finds 0 shaders in a RomFS of zstd files named `.zst`.
@@ -1188,6 +1196,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Limit:** only the comparisons. The compilers set .FTZ on nearly every float instruction of every shader, so it is in effect a mode of the whole shader, and Metal has none (`MTLCompileOptions` has math modes, no denormal control). Flushing the arithmetic would be about 3.3 million more sites in Mario Kart World, so its FADD, FMUL and FFMA keep denormals. Four denormal weights can still add up to a normal sum, which NVIDIA sees as zero; it stays finite, so it makes no NaN.
 - **Found on:** [Mario Kart World](../../dm/games/0400C3F00006E000/README.md): its deferred lighting `635061c90d75a8d1` normalises four depth-weighted half-resolution samples by `1 / sum` only where `FSETP.NEU.FTZ` says the sum is not zero. No Switch 1 game has shown the symptom; Maxwell's comparisons follow for the same semantics (the flag is on all of them in the 8 Switch 1 games counted).
 - **Check:** `DMSH_TEST_XLATE=<translator> python3 dm/gfx/tests/test_dmsh_ampere_alu.py` (`CompareFtz`, on the game's encoding) and `test_dmsh_maxwell_ftz.py`.
+
+### Ampere global atomic compare-exchange
+
+- **Symptom:** offline translation stops with `Ampere instruction 3a9 ... is not implemented` in a valid compute program.
+- **Cause:** the Ampere memory decoder registered ordinary ATOMG operations but omitted ATOMG.CAS (`0x3a9`). It compares with Rb, replaces with Rc, and returns the old memory word to Rd; the existing shared-memory CAS handler returns a success flag and cannot supply that result.
+- **Fix:** register `AAtomgCas`, using the existing global address calculation (`.E` selects the address register pair) and `AtomicCompareAndSwap(expected, desired)` IR operation. SPIR-V emits the desired value and comparator in its required order. Existing storage-buffer and raw global-memory lowering, dynamic pool lookup and write-bitmap tracking remain in use, with no ABI change. Only 32-bit signed/unsigned forms are accepted; other widths and the uniform-address form are explicitly rejected. This is the narrow ATOMG.CAS portion of [upstream #1275's Ampere commit](https://github.com/seedds/nxnative/commit/6f9733800b5f0a0e2bff97420705d1e9b063f372).
+- **Check:** `GlobalCas` in `test_dmsh_ampere_mem.py` checks separate expected/new inputs, Rd aliasing, bound and raw accesses, and rejection of unsupported forms. GPU probes additionally check success, mismatch, old-value return, an unmapped raw address and bitmap marking.
+- **Found on:** [Ocarina of Time](../../dm/games/0400486024DEC000/README.md#found-on-this-game), in its turf and leaf compute variants. Runtime dispatch activity remains to be checked.
 
 ### Float add atomics
 
